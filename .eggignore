@@ -1,0 +1,8 @@
+extends .gitignore
+.git/**
+.gitignore
+egg.json
+.eggignore
+.vscode/**
+test/**
+test_depts.ts

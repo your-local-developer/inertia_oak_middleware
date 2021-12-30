@@ -1,0 +1,18 @@
+{
+  "$schema": "https://w667dmc4vj2cj3wqkvcm5x7jwdxuy3hbjvuok75nlgpyzgqdblgq.arweave.net/t73xsFyqdCTu0FVEzt_psO9MbOFNaOV_rVmfjJoDCs0/src/schema.json",
+  "name": "inertia_oak_middleware",
+  "entry": "./mod.ts",
+  "description": "Inertia server-side adapter for Deno's web-framework oak",
+  "homepage": "https://github.com/your-local-developer/inertia_oak_middleware",
+  "repository": "https://github.com/your-local-developer/inertia_oak_middleware.git",
+  "version": "0.0.0",
+  "releaseType": "minor",
+  "bump": "patch",
+  "checkAll": true,
+  "unstable": true,
+  "unlisted": false,
+  "checkFormat": true,
+  "checkTests": false,
+  "checkInstallation": false,
+  "check": true
+}
