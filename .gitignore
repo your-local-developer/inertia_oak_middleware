@@ -3,3 +3,5 @@ eggs-debug.log
 .idea/**
 /**/cov/**
 /**/cov
+.vscode
+.vscode/**
