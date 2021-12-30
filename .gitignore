@@ -1,1 +1,5 @@
 eggs-debug.log
+.idea
+.idea/**
+/**/cov/**
+/**/cov
