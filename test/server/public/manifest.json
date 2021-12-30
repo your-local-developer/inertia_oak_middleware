@@ -1,0 +1,19 @@
+{
+  "index.html": {
+    "file": "assets/index.f07c946a.js",
+    "src": "index.html",
+    "isEntry": true,
+    "imports": [
+      "_vendor.5267cfb8.js"
+    ],
+    "css": [
+      "assets/index.42f5c400.css"
+    ],
+    "assets": [
+      "assets/svelte.d72399d3.png"
+    ]
+  },
+  "_vendor.5267cfb8.js": {
+    "file": "assets/vendor.5267cfb8.js"
+  }
+}
