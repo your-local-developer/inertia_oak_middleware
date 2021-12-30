@@ -3,5 +3,5 @@ extends .gitignore
 .gitignore
 egg.json
 .eggignore
-.vscode/**
 test/**
+.editorconfig
