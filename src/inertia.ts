@@ -49,16 +49,18 @@ export class Inertia {
     // }
     //
 
-    // TODO: test if this brings problems
-    // TODO:
-    // const decodedPath = decodeURIComponent(context.request.url.pathname);
-    // if (decodedPath == `/${this.templateName}`) {
-    //   context.response.redirect("/");
-    // } else {
-      this.version = this.checkVersionFunction();
-      this.context = context;
-      context.state.inertia = this;
-    // }
+    /*
+    TODO: decide if this adapter should redirect the user if they want to access the template
+      ```ts
+      const decodedPath = decodeURIComponent(context.request.url.pathname);
+      if (decodedPath == `/${this.templateName}`) {
+        context.response.redirect("/");
+      } else {}
+      ```
+      */
+    this.version = this.checkVersionFunction();
+    this.context = context;
+    context.state.inertia = this;
 
     await next();
   };
