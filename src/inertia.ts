@@ -1,11 +1,4 @@
-import {
-  Context,
-  join,
-  Md5,
-  Middleware,
-  renderFile,
-  Status,
-} from "../deps.ts";
+import { Context, join, Md5, Middleware, renderFile, Status } from "../deps.ts";
 
 export type InertiaConfig = {
   staticDir: string;
@@ -23,7 +16,7 @@ export type PageData = {
 export class Inertia {
   private context?: Context;
   private staticDir: string;
-  private templateName = "index.html";
+  private templateName = "template.html";
   private checkVersionFunction: () => string;
 
   version: string;
@@ -39,16 +32,33 @@ export class Inertia {
     context,
     next,
   ) => {
-    const decodedPath = decodeURIComponent(context.request.url.pathname);
+    // TODO: decide if this is a better function signature
+    //
+    // public initMiddleware: Middleware<Context<{ inertia: Inertia }>> {
+    // //= async (
+    //   //context: Context,
+    //   //next,
+    // //) => {}
+    // ...
+    // const dispatch = (
+    //   context: Context<{ inertia: Inertia }>,
+    //   next: () => Promise<unknown>,
+    // ) {
+    // }
+    // return dispatch
+    // }
+    //
+
     // TODO: test if this brings problems
-    if (decodedPath == `/${this.templateName}`) {
-      context.response.redirect("/");
-    } else {
+    // TODO:
+    // const decodedPath = decodeURIComponent(context.request.url.pathname);
+    // if (decodedPath == `/${this.templateName}`) {
+    //   context.response.redirect("/");
+    // } else {
       this.version = this.checkVersionFunction();
       this.context = context;
-      // TODO: maybe use state instead of this.context
-      // context.state.inertia = this;
-    }
+      context.state.inertia = this;
+    // }
 
     await next();
   };
