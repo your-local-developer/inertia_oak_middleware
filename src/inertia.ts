@@ -1,12 +1,23 @@
-import { Context, join, Md5, Middleware, renderFile, Status } from "../deps.ts";
+import {
+  bold,
+  Context,
+  green,
+  join,
+  Md5,
+  Middleware,
+  renderFile,
+  Status,
+  yellow,
+} from "../deps.ts";
 
 export type InertiaConfig = {
   staticDir: string;
-  checkVersionFunction: () => string;
+  checkVersionFunction: () => Promise<string>;
   templateName?: string;
+  devMode?: boolean;
 };
 
-export type PageData = {
+export type PageObject = {
   component: string;
   props: Record<string, unknown>;
   url: string;
@@ -14,119 +25,159 @@ export type PageData = {
 };
 
 export class Inertia {
-  private context?: Context;
-  private staticDir: string;
-  private templateName = "template.html";
-  private checkVersionFunction: () => string;
+  static #INERTIA_HEADER = "X-Inertia";
+  static #INERTIA_VERSION_HEADER = "X-Inertia-Version";
+  static #INERTIA_LOCATION_HEADER = "X-Inertia-Location";
 
-  version: string;
+  readonly #staticDir: string;
+  readonly #templateName: string;
+  readonly #checkVersionFunction: () => Promise<string>;
+  readonly #devMode: boolean;
 
-  constructor(config: InertiaConfig) {
-    this.staticDir = config.staticDir;
-    this.checkVersionFunction = config.checkVersionFunction;
-    this.version = this.checkVersionFunction();
-    this.templateName = config.templateName || this.templateName;
+  #context?: Context;
+
+  version = "1.0";
+
+  constructor(
+    {
+      staticDir,
+      checkVersionFunction,
+      templateName = "template.html",
+      devMode = false,
+    }: InertiaConfig,
+  ) {
+    this.#staticDir = staticDir;
+    this.#checkVersionFunction = checkVersionFunction;
+    this.#templateName = templateName;
+    this.#devMode = devMode;
   }
 
-  public initMiddleware: Middleware = async (
-    context,
-    next,
-  ) => {
-    // TODO: decide if this is a better function signature
-    //
-    // public initMiddleware: Middleware<Context<{ inertia: Inertia }>> {
-    // //= async (
-    //   //context: Context,
-    //   //next,
-    // //) => {}
-    // ...
-    // const dispatch = (
-    //   context: Context<{ inertia: Inertia }>,
-    //   next: () => Promise<unknown>,
-    // ) {
-    // }
-    // return dispatch
-    // }
-    //
-
-    /*
-    TODO: decide if this adapter should redirect the user if they want to access the template
-      ```ts
-      const decodedPath = decodeURIComponent(context.request.url.pathname);
-      if (decodedPath == `/${this.templateName}`) {
-        context.response.redirect("/");
-      } else {}
-      ```
-      */
-    this.version = this.checkVersionFunction();
-    this.context = context;
-    context.state.inertia = this;
-
-    await next();
-  };
-
-  public initStatic: Middleware = async (context) => {
-    await context.send({
-      root: this.staticDir,
-    });
-  };
-
-  public async render(
-    component: string,
-    payload: Record<string, unknown> = {},
-  ) {
-    if (this.context) {
-      const pageData: PageData = {
-        component: component,
-        props: { ...payload },
-        url: this.context.request.url.pathname,
-        version: this.context.request.headers.get("X-Inertia-Version") ||
-          this.version,
-      };
-
-      if (
-        this.context.request.headers.has("X-Inertia") &&
-        this.context.request.headers.has("X-Inertia-Version") &&
-        this.version === this.context.request.headers.get("X-Inertia-Version")
-      ) {
-        this.context.response.type = "application/json";
-        this.context.response.headers.set("Vary", "Accept");
-        this.context.response.headers.set("X-Inertia", "true");
-        this.context.response.body = JSON.stringify(pageData);
-      } else if (
-        this.context.request.headers.has("X-Inertia") &&
-        this.context.request.headers.has("X-Inertia-Version") &&
-        this.version !== this.context.request.headers.get("X-Inertia-Version")
-      ) {
-        this.context.response.status = Status.Conflict;
-        this.context.response.headers.set(
-          "X-Inertia-Location",
-          this.context.request.url.href,
-        );
-      } else {
-        this.context.response.type = "text/html; charset=utf-8";
-        this.context.response.body = await this.processTemplate(
-          pageData,
+  /**
+   * Used to register the middleware
+   * @description Checks version on every request and makes Inertia accessible to the state of the context
+   */
+  initMiddleware(): Middleware {
+    return async (
+      context,
+      next,
+    ) => {
+      /*
+      TODO: decide if this adapter should redirect the user if they want to access the template
+        ```ts
+        const decodedPath = decodeURIComponent(context.request.url.pathname);
+        if (decodedPath == `/${this.#templateName}`) {
+          context.response.redirect("/");
+        } else {}
+        ```
+        */
+      this.version = await this.#checkVersionFunction();
+      if (this.#devMode) {
+        console.log(
+          `${
+            yellow(
+              `${bold(context.request.method)} ${context.request.url.pathname}`,
+            )
+          } ${green(bold("Current asset version:"))} ${this.version}`,
         );
       }
-    } else {
-      throw Error("Context can't be undefined. Please init the middleware!");
-    }
+      this.#context = context;
+      context.state.inertia = this;
+
+      await next();
+    };
   }
 
-  public static defaultCheckManifestAssetVersion(
+  initStatic(): Middleware {
+    return async (context) => {
+      await context.send({
+        root: this.#staticDir,
+      });
+    };
+  }
+
+  static async defaultCheckManifestAssetVersion(
     pathToAssetManifest: string,
-  ): string {
-    const manifestFile = Deno.readFileSync(pathToAssetManifest);
+  ): Promise<string> {
+    const manifestFile = await Deno.readFile(pathToAssetManifest);
     const hash = new Md5();
     hash.update(manifestFile);
     hash.digest();
     return hash.toString();
   }
 
-  private async processTemplate(pageData: PageData): Promise<string> {
-    return await renderFile(join(this.staticDir, this.templateName), {
-      inertia: JSON.stringify(pageData),
+  async render(
+    component: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (this.#context) {
+      const pageObject: PageObject = {
+        component,
+        props: { ...payload },
+        url: this.#context.request.url.pathname,
+        version: this.version,
+      };
+
+      if (
+        this.#checkForInertia()
+      ) {
+        this.#handleInertia(pageObject);
+      } else if (this.checkForWrongVersion()) {
+        this.#handleWrongVersion();
+      } else {
+        await this.#handleNewPageRender(pageObject);
+      }
+    } else {
+      throw Error("Context can't be undefined. Please init the middleware!");
+    }
+  }
+
+  #checkForInertia(): boolean {
+    return (this.#context?.request.headers.has(Inertia.#INERTIA_HEADER) &&
+      this.#context.request.headers.has(Inertia.#INERTIA_VERSION_HEADER) &&
+      this.version ===
+        this.#context.request.headers.get(Inertia.#INERTIA_VERSION_HEADER)) ??
+      false;
+  }
+
+  #handleInertia(pageObject: PageObject) {
+    if (this.#context) {
+      this.#context.response.type = "application/json";
+      this.#context.response.headers.set("Vary", "Accept");
+      this.#context.response.headers.set(Inertia.#INERTIA_HEADER, "true");
+      this.#context.response.body = JSON.stringify(pageObject);
+    }
+  }
+
+  private checkForWrongVersion(): boolean {
+    return (this.#context?.request.headers.has(Inertia.#INERTIA_HEADER) &&
+      this.#context.request.headers.has(Inertia.#INERTIA_VERSION_HEADER) &&
+      this.version !==
+        this.#context.request.headers.get(Inertia.#INERTIA_VERSION_HEADER)) ??
+      false;
+  }
+
+  #handleWrongVersion() {
+    if (this.#context) {
+      this.#context.response.status = Status.Conflict;
+      this.#context.response.headers.set(
+        Inertia.#INERTIA_LOCATION_HEADER,
+        this.#context.request.url.href,
+      );
+    }
+  }
+
+  async #handleNewPageRender(pageObject: PageObject) {
+    if (this.#context) {
+      this.#context.response.type = "text/html; charset=utf-8";
+      this.#context.response.body = await this.#processMustacheTemplate(
+        pageObject,
+      );
+    }
+  }
+
+  async #processMustacheTemplate(pageObject: PageObject): Promise<string> {
+    return await renderFile(join(this.#staticDir, this.#templateName), {
+      inertia: JSON.stringify(pageObject),
     });
   }
 }
