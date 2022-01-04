@@ -4,7 +4,6 @@ const decoder = new TextDecoder();
 
 enum SupportedTemplateEngine {
   Mustache = "MUSTACHE",
-  Custom = "CUSTOM",
 }
 
 async function renderMustacheFile(
