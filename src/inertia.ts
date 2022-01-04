@@ -1,55 +1,83 @@
 import {
   bold,
   Context,
+  ContextSendOptions,
   green,
-  join,
   Md5,
   Middleware,
-  renderFile,
+  REDIRECT_BACK,
   Status,
   yellow,
 } from "../deps.ts";
+import {
+  SupportedTemplateEngine,
+  TEMPLATE_ENGINE,
+} from "./supported_template_engines.ts";
+interface InertiaState {
+  inertia: Inertia;
+}
 
-export type InertiaConfig = {
-  staticDir: string;
+type InertiaConfig = {
   checkVersionFunction: () => Promise<string>;
-  templateName?: string;
+  templateFilePath: string;
+  templateEngine?: SupportedTemplateEngine;
+  customRenderingFunction?: (
+    path: string,
+    data: Record<string, unknown>,
+  ) => Promise<string>;
   devMode?: boolean;
 };
 
-export type PageObject = {
+type PageObject = {
   component: string;
   props: Record<string, unknown>;
   url: string;
   version: string;
 };
 
-export class Inertia {
+class Inertia {
   static #INERTIA_HEADER = "X-Inertia";
   static #INERTIA_VERSION_HEADER = "X-Inertia-Version";
   static #INERTIA_LOCATION_HEADER = "X-Inertia-Location";
 
-  readonly #staticDir: string;
-  readonly #templateName: string;
+  readonly #templateFilePath: string;
   readonly #checkVersionFunction: () => Promise<string>;
+  readonly #renderingFunction: (
+    path: string,
+    data: Record<string, unknown>,
+  ) => Promise<string>;
   readonly #devMode: boolean;
 
-  #context?: Context;
+  #sharedProps: Record<string, unknown> = {};
+  get sharedProps(): Record<string, unknown> {
+    return this.#sharedProps;
+  }
+
+  #context?: Context<InertiaState> | Context;
 
   version = "1.0";
 
   constructor(
     {
-      staticDir,
       checkVersionFunction,
-      templateName = "template.html",
+      templateFilePath,
       devMode = false,
+      templateEngine = SupportedTemplateEngine.Mustache,
+      customRenderingFunction = TEMPLATE_ENGINE.get(templateEngine),
     }: InertiaConfig,
   ) {
-    this.#staticDir = staticDir;
     this.#checkVersionFunction = checkVersionFunction;
-    this.#templateName = templateName;
+    this.#templateFilePath = templateFilePath;
     this.#devMode = devMode;
+
+    // TODO: merge customRenderingFunction with renderer as union type
+    if (customRenderingFunction) {
+      this.#renderingFunction = customRenderingFunction;
+    } else {
+      throw new Error(
+        "Custom rendering function not implementet. You might have choosen custom but did not provide a function.",
+      );
+    }
   }
 
   /**
@@ -65,7 +93,7 @@ export class Inertia {
       TODO: decide if this adapter should redirect the user if they want to access the template
         ```ts
         const decodedPath = decodeURIComponent(context.request.url.pathname);
-        if (decodedPath == `/${this.#templateName}`) {
+        if (decodedPath == `/${this.#templatePath}`) {
           context.response.redirect("/");
         } else {}
         ```
@@ -82,20 +110,31 @@ export class Inertia {
       }
       this.#context = context;
       context.state.inertia = this;
-
-      await next();
+      if (this.#checkForWrongVersion()) {
+        this.location(this.#context.request.url.href);
+      } else {
+        await next();
+        if (
+          context.request.headers.has(Inertia.#INERTIA_HEADER) &&
+          ["PUT", "PATCH", "DELETE"].includes(context.request.method) &&
+          context.response.status == Status.Found
+        ) {
+          context.response.status = Status.SeeOther;
+        }
+      }
     };
   }
 
-  initStatic(): Middleware {
+  initStatic(
+    pathToStaticDir: string,
+    options?: ContextSendOptions,
+  ): Middleware {
     return async (context) => {
-      await context.send({
-        root: this.#staticDir,
-      });
+      await context.send({ ...options, root: pathToStaticDir });
     };
   }
 
-  static async defaultCheckManifestAssetVersion(
+  static async checkManifestAssetVersion(
     pathToAssetManifest: string,
   ): Promise<string> {
     const manifestFile = await Deno.readFile(pathToAssetManifest);
@@ -107,39 +146,74 @@ export class Inertia {
 
   async render(
     component: string,
-    payload: Record<string, unknown> = {},
+    props: Record<string, unknown> = {},
   ): Promise<void> {
     if (this.#context) {
       const pageObject: PageObject = {
         component,
-        props: { ...payload },
+        props: { ...this.#sharedProps, ...props },
         url: this.#context.request.url.pathname,
         version: this.version,
       };
 
       if (
-        this.#checkForInertia()
+        this.#checkForInertiaRequest()
       ) {
-        this.#handleInertia(pageObject);
-      } else if (this.checkForWrongVersion()) {
-        this.#handleWrongVersion();
+        this.#handleInertiaResponse(pageObject);
       } else {
-        await this.#handleNewPageRender(pageObject);
+        await this.#renderTemplate(pageObject);
       }
     } else {
       throw Error("Context can't be undefined. Please init the middleware!");
     }
   }
 
-  #checkForInertia(): boolean {
+  share(sharedProps: Record<string, unknown>) {
+    this.#sharedProps = { ...this.#sharedProps, ...sharedProps };
+  }
+
+  flushShared() {
+    this.#sharedProps = {};
+  }
+
+  redirect(url: string | URL | typeof REDIRECT_BACK = REDIRECT_BACK) {
+    const fallback = this.#context?.request.url.pathname;
+    let redirectTo = "/";
+    if (url === REDIRECT_BACK) {
+      this.#context?.response.redirect(url, fallback);
+    } else if (typeof url === "object") {
+      redirectTo = String(url);
+    } else {
+      redirectTo = url;
+    }
+    this.#context?.response.redirect(redirectTo);
+  }
+
+  location(url: string | URL) {
+    if (typeof url === "object") {
+      url = String(url);
+    }
+    // 409
+    if (this.#context) {
+      this.#context.response.status = Status.Conflict;
+      this.#context.response.headers.set(
+        Inertia.#INERTIA_LOCATION_HEADER,
+        url,
+      );
+    }
+  }
+
+  #checkForInertiaRequest(): boolean {
     return (this.#context?.request.headers.has(Inertia.#INERTIA_HEADER) &&
-      this.#context.request.headers.has(Inertia.#INERTIA_VERSION_HEADER) &&
-      this.version ===
-        this.#context.request.headers.get(Inertia.#INERTIA_VERSION_HEADER)) ??
+        (this.#context.request.headers.has(Inertia.#INERTIA_VERSION_HEADER) &&
+          this.version ===
+            this.#context.request.headers.get(
+              Inertia.#INERTIA_VERSION_HEADER,
+            )) || this.#context?.request.method !== "GET") ??
       false;
   }
 
-  #handleInertia(pageObject: PageObject) {
+  #handleInertiaResponse(pageObject: PageObject) {
     if (this.#context) {
       this.#context.response.type = "application/json";
       this.#context.response.headers.set("Vary", "Accept");
@@ -148,36 +222,27 @@ export class Inertia {
     }
   }
 
-  private checkForWrongVersion(): boolean {
+  #checkForWrongVersion(): boolean {
     return (this.#context?.request.headers.has(Inertia.#INERTIA_HEADER) &&
       this.#context.request.headers.has(Inertia.#INERTIA_VERSION_HEADER) &&
-      this.version !==
-        this.#context.request.headers.get(Inertia.#INERTIA_VERSION_HEADER)) ??
+      (this.version !==
+          this.#context.request.headers.get(Inertia.#INERTIA_VERSION_HEADER) &&
+        this.#context.request.method === "GET")) ??
       false;
   }
 
-  #handleWrongVersion() {
-    if (this.#context) {
-      this.#context.response.status = Status.Conflict;
-      this.#context.response.headers.set(
-        Inertia.#INERTIA_LOCATION_HEADER,
-        this.#context.request.url.href,
-      );
-    }
-  }
-
-  async #handleNewPageRender(pageObject: PageObject) {
+  async #renderTemplate(pageObject: PageObject) {
     if (this.#context) {
       this.#context.response.type = "text/html; charset=utf-8";
-      this.#context.response.body = await this.#processMustacheTemplate(
-        pageObject,
+      this.#context.response.body = await this.#renderingFunction(
+        this.#templateFilePath,
+        {
+          inertia: JSON.stringify(pageObject),
+        },
       );
     }
   }
-
-  async #processMustacheTemplate(pageObject: PageObject): Promise<string> {
-    return await renderFile(join(this.#staticDir, this.#templateName), {
-      inertia: JSON.stringify(pageObject),
-    });
-  }
 }
+
+export { Inertia };
+export type { InertiaConfig, InertiaState };
