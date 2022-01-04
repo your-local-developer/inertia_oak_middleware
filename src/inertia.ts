@@ -20,11 +20,12 @@ interface InertiaState {
 type InertiaConfig = {
   checkVersionFunction: () => Promise<string>;
   templateFilePath: string;
-  templateEngine?: SupportedTemplateEngine;
-  customRenderingFunction?: (
-    path: string,
-    data: Record<string, unknown>,
-  ) => Promise<string>;
+  templateEngine?:
+    | SupportedTemplateEngine
+    | ((
+      path: string,
+      data: Record<string, unknown>,
+    ) => Promise<string>);
   devMode?: boolean;
 };
 
@@ -63,19 +64,23 @@ class Inertia {
       templateFilePath,
       devMode = false,
       templateEngine = SupportedTemplateEngine.Mustache,
-      customRenderingFunction = TEMPLATE_ENGINE.get(templateEngine),
     }: InertiaConfig,
   ) {
     this.#checkVersionFunction = checkVersionFunction;
     this.#templateFilePath = templateFilePath;
     this.#devMode = devMode;
 
-    // TODO: merge customRenderingFunction with renderer as union type
-    if (customRenderingFunction) {
-      this.#renderingFunction = customRenderingFunction;
+    // init renderingFunction
+    if (
+      typeof templateEngine === "string" && TEMPLATE_ENGINE.has(templateEngine)
+    ) {
+      // TODO: maybe do an undefined check and throw an error instead of !
+      this.#renderingFunction = TEMPLATE_ENGINE.get(templateEngine)!;
+    } else if (typeof templateEngine === "function") {
+      this.#renderingFunction = templateEngine;
     } else {
       throw new Error(
-        "Custom rendering function not implementet. You might have choosen custom but did not provide a function.",
+        `Rendering function not implementet!`,
       );
     }
   }
