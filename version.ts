@@ -1,5 +1,5 @@
 /** `version` managed by https://deno.land/x/land/publish. */
-export const VERSION = "v0.0.0";
+export const VERSION = "v0.1.0";
 
 /** `prepublish` will be invoked before publish, return `false` to prevent the publish. */
 export async function prepublish(version: string) {
@@ -12,7 +12,6 @@ export async function prepublish(version: string) {
       `//deno.land/x/inertia_oak_middleware@${version}/`,
     ),
   );
-  return false;
 }
 
 /** `postpublish` will be invoked after published. */
