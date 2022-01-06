@@ -25,9 +25,22 @@ const inertia = new Inertia({
   devMode: true,
 });
 
+inertia.share({
+  foo: {
+    bar: "hello",
+    ping: () => "pong",
+  },
+  test: "überschrieben",
+});
+
 router
   .get("/", async () => {
     await inertia.render("App");
+  })
+  .get("/test", async (context) => {
+    await context.state.inertia.render("Test", { uno: "dos" }, {
+      test: async () => await "testo amigo",
+    });
   })
   .get("/book", async (context) => {
     await context.state.inertia.render("Book", {
@@ -35,22 +48,19 @@ router
     });
   })
   .get("/book/:id", async (context) => {
-    // test if the header still is applied to the context copy of inertia
+    // TODO: render Error
     context.response.headers.append("x-test", "true");
     // if (context.params && books.has(context.params.id)) {
     const book = books.get(context.params.id);
     const payload: { book?: Book } = { book: book };
     await inertia.render("Book", payload);
     // } else {
-    // TODO: render Error
     // }
   })
-  .post("/book/:id", async (context) => {
-    const ping = await context.request.body().value;
-    inertia.location("https://developer.mozilla.org/")
+  .post("/book/:id", () => {
+    inertia.location("https://developer.mozilla.org/");
   })
   .put("/book/:id", async (context) => {
-    // TODO: fix false return of 409 when version is incorrect https://inertiajs.com/the-protocol#the-page-object#asset-versioning
     const ping = await context.request.body().value;
     context.response.headers.append("X-Pong", ping);
     inertia.redirect();
