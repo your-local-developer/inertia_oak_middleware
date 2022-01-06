@@ -55,6 +55,7 @@ class Inertia {
   }
 
   #context?: Context<InertiaState> | Context;
+  #defaultViewData: Record<string, unknown> = {};
 
   version = "1.0";
 
@@ -151,12 +152,13 @@ class Inertia {
 
   async render(
     component: string,
-    props: Record<string, unknown> = {},
+    props: Record<string, unknown> | null = {},
+    viewData: Record<string, unknown> | null = {},
   ): Promise<void> {
     if (this.#context) {
       const pageObject: PageObject = {
         component,
-        props: { ...this.#sharedProps, ...props },
+        props: await this.#computeProps({ ...this.#sharedProps, ...props }),
         url: this.#context.request.url.pathname,
         version: this.version,
       };
@@ -166,19 +168,27 @@ class Inertia {
       ) {
         this.#handleInertiaResponse(pageObject);
       } else {
-        await this.#renderTemplate(pageObject);
+        await this.#renderTemplate(pageObject, viewData || {});
       }
     } else {
       throw Error("Context can't be undefined. Please init the middleware!");
     }
   }
 
-  share(sharedProps: Record<string, unknown>) {
+  share(sharedProps?: Record<string, unknown> | null) {
     this.#sharedProps = { ...this.#sharedProps, ...sharedProps };
   }
 
   flushShared() {
     this.#sharedProps = {};
+  }
+
+  includeDefaultViewData(viewData?: Record<string, unknown> | null) {
+    this.#defaultViewData = { ...this.#defaultViewData, ...viewData };
+  }
+
+  flushDefaultViewData() {
+    this.#defaultViewData = {};
   }
 
   redirect(url: string | URL | typeof REDIRECT_BACK = REDIRECT_BACK) {
@@ -236,13 +246,49 @@ class Inertia {
       false;
   }
 
-  async #renderTemplate(pageObject: PageObject) {
+  async #computeProps(
+    allProps: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const computedProps: Record<string, unknown> = {};
+    for (const key in allProps) {
+      const tempProp = allProps[key];
+      const computationResult = await this.#computeProp(tempProp);
+      computedProps[key] = computationResult;
+    }
+    return computedProps;
+  }
+
+  async #computeProp(
+    value: unknown,
+  ): Promise<unknown> {
+    if (typeof value === "function") {
+      return await value();
+    } else if (typeof value === "object" && value) {
+      return this.#computeProps(value as Record<string, unknown>);
+    } else {
+      return value;
+    }
+  }
+
+  async #renderTemplate(
+    pageObject: PageObject,
+    viewData: Record<string, unknown>,
+  ) {
+    console.log({
+      ...await this.#computeProps(this.#defaultViewData),
+      ...await this.#computeProps(viewData),
+      inertia: JSON.stringify(pageObject),
+      page: pageObject,
+    });
     if (this.#context) {
       this.#context.response.type = "text/html; charset=utf-8";
       this.#context.response.body = await this.#renderingFunction(
         this.#templateFilePath,
         {
+          ...await this.#computeProps(this.#defaultViewData),
+          ...await this.#computeProps(viewData),
           inertia: JSON.stringify(pageObject),
+          page: pageObject,
         },
       );
     }
